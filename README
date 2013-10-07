@@ -1,0 +1,16 @@
+Scripts that helps you to maintain system configuration in a subversion
+repository, and auto deploy configuration after commits.
+
+How to set up
+
+Directory structure
+script
+svnag
+
+Optional directories
+apache
+dns
+dhcp
+icinga
+munin
+vmps
