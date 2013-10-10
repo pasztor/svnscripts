@@ -1,0 +1,104 @@
+#!/bin/bash
+
+# $Id: svnag 541 2013-08-29 16:30:18Z pasztor $
+
+rsync_server="rsync --server "
+
+[ -e /etc/svnag.cfg ] && . /etc/svnag.cfg
+
+do_error () {
+	echo -n "Az eredeti parancs: " | tee -a /tmp/svnag.$$
+	echo "$SSH_ORIGINAL_COMMAND"   | tee -a /tmp/svnag.$$
+	exit 1
+}
+
+check_action () {
+	local param="$1"
+	shift
+	for i in "$@" ; do
+		[ "$i" = "$param" ] && return 0
+	done
+	do_error
+}
+
+check_and_do_ctl () {
+	check_action "${SSH_ORIGINAL_COMMAND#* }" "${servctl_allowed[@]}"
+	/etc/init.d/"${SSH_ORIGINAL_COMMAND#* }" "${SSH_ORIGINAL_COMMAND%% *}"
+}
+
+reload_try () {
+	check_action "${SSH_ORIGINAL_COMMAND#* }" "${servctl_allowed[@]}"
+	case "${SSH_ORIGINAL_COMMAND#* }" in
+		icinga)
+			if icinga -v /etc/icinga/icinga.cfg ;
+			then
+				/etc/init.d/icinga reload
+			else
+				echo 'Nem jo a konfig! Javitsad kie!' >&2
+				exit 1
+			fi
+		;;
+	esac
+}
+
+check_and_do_permfix () {
+	check_action "${SSH_ORIGINAL_COMMAND#* }" "${permfix_allowed[@]}"
+	case "${SSH_ORIGINAL_COMMAND#* }" in
+		apache)
+			chown root.root -R /etc/apache2
+		;;
+		bind)
+			chown root.root -R /etc/bind
+			chown root.bind /etc/bind/named.conf*
+			chown bind.bind -R /etc/bind/rndc.key /var/cache/bind
+			chmod 640 /etc/bind/rndc.key
+		;;
+		dhcp)
+			chown root.root -R /etc/dhcp
+		;;
+		munin)
+			chown -R munin.munin /etc/munin
+		;;
+		nagios)
+			chown -R root.root /etc/icinga
+			chown root.nagios /etc/icinga/resource.cfg
+			chmod 640 /etc/icinga/resource.cfg
+		;;
+		syslog)
+			chown root.root -R /etc/syslog-ng
+		;;
+		etherwake)
+			chown root.staff -R /usr/local/share/etherwake
+		;;
+	esac
+}
+
+case "$SSH_ORIGINAL_COMMAND" in
+	rsync*)
+		rok=0
+		for i in ${!rsync_allowed[@]} ;do
+			p=" . ${rsync_allowed[$i]}/"
+			[ "${SSH_ORIGINAL_COMMAND: -${#p}:${#p}}" = "$p" ] && rok=1
+		done
+		[ $rok -eq 1 ] && exec $SSH_ORIGINAL_COMMAND
+		do_error
+	;;
+	teszt)
+		echo "Ez egy teszt"
+	;;
+	restart\ *)
+		check_and_do_ctl
+	;;
+	reload\ *)
+		check_and_do_ctl
+	;;
+	try\ *)
+		reload_try
+	;;
+	permfix\ *)
+		check_and_do_permfix
+	;;
+	*)
+		do_error
+	;;
+esac
